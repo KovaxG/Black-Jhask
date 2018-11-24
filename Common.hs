@@ -1,4 +1,4 @@
-module BlackJack where
+module Common where
 
 {- Type definitions -}
 
@@ -19,13 +19,13 @@ data Card = Ace
           | Jack
           | Queen
           | King
-          deriving (Show, Enum)
+          deriving (Show, Enum, Eq)
 
 {- Helper functions -}
 
 -- calculates the possible values your hand can have
 handValue :: [Card] -> [Score]
-handValue = fromValues . mconcat . map value
+handValue = filter (<=21) . fromValues . mconcat . map value
 
 instance Semigroup Value where
   (<>) = (|+|)
@@ -61,8 +61,14 @@ value card = case card of
 deck :: [Card]
 deck = concat $ replicate 4 [Ace .. King]
 
-gameDeck :: [Card]
-gameDeck = concat $ replicate 6 deck
+drawCards :: Int -> [Card] -> ([Card], [Card])
+drawCards nr deck = (take nr deck, drop nr deck)
 
-main :: IO ()
-main = undefined
+playGame :: IO state -> (state -> IO (Maybe state)) -> IO ()
+playGame setup loopLogic = do
+  initialState <- setup
+  loop initialState
+  where 
+    loop state = do
+      newState <- loopLogic state
+      maybe (putStrLn "End of Game") loop newState
