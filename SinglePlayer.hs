@@ -31,15 +31,28 @@ drawCardForSelected players deck =
       newPlayers = replace newPlayer players
   in (newPlayers, newDeck)
 
+
+endTurnIfBust :: Zipper Player -> (Zipper Player, WinState)
+endTurnIfBust players = 
+  let selected = cursor players
+  in if isBusted selected
+     then focusOnNextPlayer players
+     else (players, None)
+  where
+    isBusted p = null . handValue . pHand $ p
+  
 singlePlayerProcess :: PlayerAction -> GameState -> GameState
 singlePlayerProcess Ask s =
   s {
-    gPlayers = newPlayers,
-    gDeck = newDeck
+    gPlayers = newPlayers2,
+    gDeck = newDeck,
+    gWinstate = newWinState
   }
   where
     (newPlayers, newDeck) = 
       drawCardForSelected (gPlayers s) (gDeck s)
+    (newPlayers2, newWinState) = 
+      endTurnIfBust newPlayers
     
 singlePlayerProcess Hold s = 
   s { 
@@ -47,7 +60,12 @@ singlePlayerProcess Hold s =
     gWinstate = newWinState
   }
   where
-    newPlayers = right $ gPlayers s
+    (newPlayers, newWinState) = focusOnNextPlayer (gPlayers s)
+    
+focusOnNextPlayer :: Zipper Player -> (Zipper Player, WinState)
+focusOnNextPlayer players = (newPlayers, newWinState)
+  where 
+    newPlayers = right players
     newWinState = if endp newPlayers
                   then endRoundStuff (toList newPlayers)
                   else None
@@ -92,16 +110,20 @@ loopLogic state = do
         
 showState :: GameState -> IO ()
 showState s = do
-  putStrLn . show . gPlayers $ s
+  showStates
+  putStrLn ""
   let selected = safeCursor $ gPlayers s
-  maybe (return ()) (\n -> putStrLn $ "Current: " ++ show n) selected
+  maybe (return ()) (\n -> putStrLn $ "Current: " ++ show n ++ " - " ++ show (handValue (pHand n))) selected
+  putStrLn ""
   putStrLn . show . gWinstate $ s  
-    
+  where
+    showStates = mapM_ (\p -> putStrLn $ show p ++ " - " ++ show (handValue (pHand p))) $ toList . gPlayers $ s
+  
 setup :: IO GameState
 setup = do
   putStrLn "Playing Single player game"
+  names <- getPlayerNames
   putStrLn "Shuffling deck..."
-  let names = ["Gyuri", "Petra", "Sapa"]
   deck <- shuffleM gameDeck 
   let (newDeck, players) = foldl myRule (deck, []) names
   let startState =  GameState {
@@ -118,6 +140,13 @@ setup = do
           newPlayer = Player name hand
       in (newDeck, newPlayer : players)          
         
+getPlayerNames :: IO [String]
+getPlayerNames = do
+  putStrLn "How many players?"
+  nr <- read <$> getLine :: IO Int
+  putStrLn "Please add a name for each player"
+  sequence $ replicate nr getLine
+        
 askForAction :: IO PlayerAction
 askForAction = do
   putStrLn "Hold or Ask?"
@@ -127,7 +156,7 @@ askForAction = do
     "Ask" -> return Ask
     "Hold" -> return Hold
     _ -> askForAction
-
+    
 main :: IO ()
 main = playGame setup loopLogic
 
