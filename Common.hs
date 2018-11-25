@@ -1,5 +1,7 @@
 module Common where
 
+import Data.Maybe
+
 {- Type definitions -}
 
 type Score = Int
@@ -22,6 +24,16 @@ data Card = Ace
           deriving (Show, Enum, Eq)
 
 {- Helper functions -}
+
+safeRead :: Read a => String -> Maybe a
+safeRead = fmap fst . listToMaybe . reads
+
+zipMap :: (a -> b) -> [a] -> [(a, b)]
+zipMap f a = zip a $ map f a
+
+maxOr :: Int -> [Int] -> Int
+maxOr a [] = a
+maxOr _ aa = maximum aa
 
 -- calculates the possible values your hand can have
 handValue :: [Card] -> [Score]
@@ -55,7 +67,7 @@ value card = case card of
   Eight -> Only 8
   Nine  -> Only 9
   _     -> Only 10
-
+  
 {- Game stuff -}
 
 deck :: [Card]
