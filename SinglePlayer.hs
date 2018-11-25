@@ -1,7 +1,7 @@
 module SinglePlayer where
 
 import Common
-import Data.List.Zipper 
+import Data.List.Zipper
 import Debug.Trace
 import System.Random.Shuffle
 
@@ -25,26 +25,36 @@ data GameState = GameState {
 main :: IO ()
 main = playGame setup loopLogic
 
+
 setup :: IO GameState
 setup = do
   putStrLn "Playing Single player game"
   names <- getPlayerNames
-  putStrLn "Shuffling deck..."
-  deck <- shuffleM gameDeck 
+  putStrLn "\nShuffling deck..."
+  deck <- shuffleM gameDeck
   let (newDeck, players) = foldl deal (deck, []) names
   let startState =  GameState {
-    gPlayers = fromList players,   
+    gPlayers = fromList players,
     gDeck = newDeck,
     gWinstate = None
   }
+  showStates players
   showState startState []
   return startState
   where
-    gameDeck = concat $ replicate 6 deck 
-    deal (deck, players) name = 
+    gameDeck = concat $ replicate 6 deck
+
+    deal (deck, players) name =
       let (hand, newDeck) = drawCards 2 deck
           newPlayer = Player name hand
-      in (newDeck, newPlayer : players)
+      in (newDeck, players ++ [newPlayer])
+
+    showStates players = mapM_ printPlayer players
+      where
+        printPlayer player =
+          let playerHandValue = show . handValue . pHand $ player
+          in putStrLn $ show player ++ " - " ++ playerHandValue
+
 
 getPlayerNames :: IO [String]
 getPlayerNames = do
@@ -54,69 +64,73 @@ getPlayerNames = do
   where
     askForNames nr = do
       putStrLn "Please add a name for each player"
-      sequence $ replicate nr getLine
+      let indexes = [1 .. nr]
+      let readLines = replicate nr getLine
+      sequence $ zipWith
+        (\i r -> putStr (show i ++ ": ") >> r)
+        indexes
+        readLines
+
 
 showState :: GameState -> [GameOutput] -> IO ()
-showState state output = do
-  let players = gPlayers state
-  putStrLn ""
-  mapM_ (putStrLn . (++) "-> " . show) output
-  putStrLn ""
-  showStates (toList players)
-  putStrLn ""
-  maybe noOp showSelected . safeCursor $ players
+showState state outputs = do
+  newLine
+  mapM_ (putStrLn . (++) "-> " . show) outputs
+  newLine
+  maybe noOp showSelected . safeCursor . gPlayers $ state
   where
+    newLine = putStrLn ""
     noOp = return ()
-    showSelected player = 
+    showSelected player =
       let playerHandValue = show . handValue . pHand $ player
       in putStrLn $ "Current: " ++ show player ++ " - " ++ playerHandValue
-    showStates players = 
-      mapM_ forEach players
-      where
-        forEach player =
-          let playerHandValue = show . handValue . pHand $ player
-          in putStrLn $ show player ++ " - " ++ playerHandValue
-      
+
+
 loopLogic :: GameState -> IO (Maybe GameState)
 loopLogic state = do
-    action <- askForAction
-    let (newState, output) = singlePlayerProcess action state
+    action <- askForAction (pName . cursor . gPlayers $ state)
+    let (newState, outputs) = singlePlayerProcess action state
     if isGameOver newState
     then do
-      showState newState output
-      return Nothing 
+      showState newState outputs
+      return Nothing
     else do
-      showState newState output
+      showState newState outputs
       return $ Just newState
     where
-      isGameOver = (/=) None . gWinstate  
-     
-askForAction :: IO PlayerAction
-askForAction = do
-  putStr "Hold or Ask?\n> "
+      isGameOver = (/=) None . gWinstate
+
+
+askForAction :: String -> IO PlayerAction
+askForAction name = do
+  putStrLn "Hold or Ask?"
+  putStr $ name ++ " > "
   cmdMaybe <- safeRead <$> getLine
-  maybe askForAction return cmdMaybe
-  
+  maybe (askForAction name) return cmdMaybe
+
+
 singlePlayerProcess :: PlayerAction -> GameState -> (GameState, [GameOutput])
 singlePlayerProcess Ask state =
-  let (newPlayers, newDeck, out1) = 
-        drawCardForSelected (gPlayers state) (gDeck state) 
-      (newPlayers2, newWinState, out2) = endTurnIfBust newPlayers
+  let (newPlayers, newDeck, outputs1) =
+        drawCardForSelected (gPlayers state) (gDeck state)
+      (newPlayers2, newWinState, outputs2) = endTurnIfBust newPlayers
       newState = state {
         gPlayers = newPlayers2,
         gDeck = newDeck,
         gWinstate = newWinState
-      }  
-  in (newState, out1 ++ out2)  
+      }
+  in (newState, outputs1 ++ outputs2)
 singlePlayerProcess Hold state =
-  let (newPlayers, newWinState, out) = focusOnNextPlayer (gPlayers state)
-      newState =  state { 
+  let (newPlayers, newWinState, outputs) = focusOnNextPlayer (gPlayers state)
+      newState =  state {
         gPlayers = newPlayers,
         gWinstate = newWinState
       }
-  in (newState, out)
+  in (newState, outputs)
 
-drawCardForSelected :: Zipper Player -> [Card] 
+
+drawCardForSelected :: Zipper Player
+                    -> [Card]
                     -> (Zipper Player, [Card], [GameOutput])
 drawCardForSelected players deck =
   let selectedPlayer = cursor players
@@ -128,40 +142,41 @@ drawCardForSelected players deck =
     addCards :: Player -> [Card] -> Player
     addCards p cs = p { pHand = cs ++ pHand p }
 
+
 endTurnIfBust :: Zipper Player -> (Zipper Player, WinState, [GameOutput])
-endTurnIfBust players = 
+endTurnIfBust players =
   let selected = cursor players
   in if isBusted selected
-     then let (newPlayers, newWinState, out) = focusOnNextPlayer players
-          in (newPlayers, newWinState, [Bust] ++ out)
+     then let (newPlayers, newWinState, outputs) = focusOnNextPlayer players
+          in (newPlayers, newWinState, [Bust] ++ outputs)
      else (players, None, [])
   where
-    isBusted p = null . handValue . pHand $ p
-    
+    isBusted = null . handValue . pHand
+
+
 focusOnNextPlayer :: Zipper Player -> (Zipper Player, WinState, [GameOutput])
-focusOnNextPlayer players = (newPlayers, newWinState, out)
-  where 
-    newPlayers = right players
-    (newWinState, out) = if endp newPlayers
-                         then let ws = endRoundStuff (toList newPlayers)
-                              in (ws, [EndGame ws])
-                         else (None, [])
-    
-endRoundStuff :: [Player] -> WinState
-endRoundStuff = foldl rule None
+focusOnNextPlayer players = (newPlayers, newWinState, outputs)
   where
-    rule None p = PlayerWin p
-    rule (PlayerWin p2) p1 = 
-      let p1Value = maxOr 0 . handValue $ pHand p1
-          p2Value = maxOr 0 . handValue $ pHand p2
-      in case (compare p1Value p2Value) of
+    newPlayers = right players
+    (newWinState, outputs) = if endp newPlayers
+                             then let ws = endRoundStuff (toList newPlayers)
+                                  in (ws, [EndGame ws])
+                             else (None, [])
+
+
+endRoundStuff :: [Player] -> WinState
+endRoundStuff = foldl updateWinState None
+  where
+    bestValue = maxOr 0 . handValue . pHand
+
+    updateWinState None p = PlayerWin p
+    updateWinState (PlayerWin p2) p1 =
+      case compare (bestValue p1) (bestValue p2) of
         EQ -> Draw [p1, p2]
         LT -> PlayerWin p2
         GT -> PlayerWin p1
-    rule (Draw ps) p = 
-      let pDValue = maxOr 0 . handValue . pHand . head $ ps
-          pValue = maxOr 0 . handValue . pHand $ p
-      in case (compare pDValue pValue) of
+    updateWinState (Draw ps) p =
+      case compare (bestValue . head $ ps) (bestValue p) of
         EQ -> Draw $ p : ps
         LT -> PlayerWin p
         GT -> Draw ps
