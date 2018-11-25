@@ -1,6 +1,7 @@
 module Common where
 
 import Data.Maybe
+import Data.Monoid
 
 {- Type definitions -}
 
@@ -39,11 +40,9 @@ maxOr _ aa = maximum aa
 handValue :: [Card] -> [Score]
 handValue = filter (<=21) . fromValues . mconcat . map value
 
-instance Semigroup Value where
-  (<>) = (|+|)
-
 instance Monoid Value where
   mempty = Only 0 -- kind of true
+  mappend = (|+|)
 
 (|+|) :: Value -> Value -> Value
 Only a |+| Only b = Only $ a + b
